@@ -148,21 +148,20 @@ void GameCubeControllerAnalyzer::DecodeFrames()
         }
 
         // response
-        uint16_t device;
+        uint8_t device[ 2 ];
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            device = data;
+            device[ 1 ] = data;
         }
 
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
-
         if( ok )
         {
-            device |= data << 8;
-            frame_v2.AddInteger( "Device", device );
+            device[ 0 ] = data;
+            frame_v2.AddByteArray( "Device", device, sizeof( device ) );
         }
 
         if( ok )
@@ -210,19 +209,19 @@ void GameCubeControllerAnalyzer::DecodeFrames()
         }
 
         // response
-        uint16_t buttons;
+        uint8_t buttons[ 2 ];
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            buttons = data;
+            buttons[ 1 ] = data;
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            buttons |= data << 8;
-            frame_v2.AddInteger( "Buttons", buttons );
+            buttons[ 0 ] = data;
+            frame_v2.AddByteArray( "Buttons", buttons, sizeof( buttons ) );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
@@ -240,13 +239,13 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-stick X", data );
+            frame_v2.AddByte( "C-Stick X", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-stick Y", data );
+            frame_v2.AddByte( "C-Stick Y", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
@@ -283,19 +282,19 @@ void GameCubeControllerAnalyzer::DecodeFrames()
         }
 
         // response
-        uint16_t buttons;
+        uint8_t buttons[ 2 ];
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            buttons = data;
+            buttons[ 1 ] = data;
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            buttons |= data << 8;
-            frame_v2.AddInteger( "Buttons", buttons );
+            buttons[ 0 ] = data;
+            frame_v2.AddByteArray( "Buttons", buttons, sizeof( buttons ) );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
@@ -313,13 +312,13 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-stick X", data );
+            frame_v2.AddByte( "C-Stick X", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-stick Y", data );
+            frame_v2.AddByte( "C-Stick Y", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
@@ -331,7 +330,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "R Anlog", data );
+            frame_v2.AddByte( "R Analog", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
@@ -385,19 +384,19 @@ void GameCubeControllerAnalyzer::DecodeFrames()
         }
 
         // response
-        uint16_t buttons;
+        uint8_t buttons[ 2 ];
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            buttons = data;
+            buttons[ 1 ] = data;
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            buttons |= data << 8;
-            frame_v2.AddInteger( "Buttons", buttons );
+            buttons[ 0 ] = data;
+            frame_v2.AddByteArray( "Buttons", buttons, sizeof( buttons ) );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
@@ -415,13 +414,13 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-stick X", data );
+            frame_v2.AddByte( "C-Stick X", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-stick Y", data );
+            frame_v2.AddByte( "C-Stick Y", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
@@ -486,19 +485,19 @@ void GameCubeControllerAnalyzer::DecodeFrames()
         }
 
         // response
-        uint16_t buttons;
+        uint8_t buttons[ 2 ];
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            buttons = data;
+            buttons[ 1 ] = data;
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            buttons |= data << 8;
-            frame_v2.AddInteger( "Buttons", buttons );
+            buttons[ 0 ] = data;
+            frame_v2.AddByteArray( "Buttons", buttons, sizeof( buttons ) );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
@@ -516,13 +515,13 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-stick X", data );
+            frame_v2.AddByte( "C-Stick X", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-stick Y", data );
+            frame_v2.AddByte( "C-Stick Y", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
