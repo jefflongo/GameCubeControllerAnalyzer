@@ -8,3 +8,4 @@ cmake --build build
 ```
 
 ![GameCube Controller Analyzer](/analyzer.png)
+![GameCube Controller Data Table](/data_table.png)
