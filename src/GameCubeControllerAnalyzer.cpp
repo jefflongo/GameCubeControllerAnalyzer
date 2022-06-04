@@ -3,7 +3,6 @@
 #include "GameCubeControllerAnalyzerSettings.h"
 
 #include <AnalyzerChannelData.h>
-#include <vector>
 
 GameCubeControllerAnalyzer::GameCubeControllerAnalyzer()
     : Analyzer2(), mSettings( new GameCubeControllerAnalyzerSettings() ), mSimulationInitilized( false )
@@ -84,7 +83,7 @@ void DestroyAnalyzer( Analyzer* analyzer )
 
 U64 GameCubeControllerAnalyzer::GetPulseWidthNs( U64 start_edge, U64 end_edge )
 {
-    return static_cast<U64>( ( end_edge - start_edge ) * 1e9 / mSampleRateHz );
+    return static_cast<U64>( ( end_edge - start_edge ) * 1000000000 / mSampleRateHz );
 }
 
 // advances to the rising edge at the end of a packet
@@ -95,16 +94,17 @@ void GameCubeControllerAnalyzer::AdvanceToEndOfPacket()
         mGamecube->AdvanceToNextEdge();
     }
 
-    while( GetPulseWidthNs( mGamecube->GetSampleNumber(), mGamecube->GetSampleOfNextEdge() ) < 1e5 )
+    while( GetPulseWidthNs( mGamecube->GetSampleNumber(), mGamecube->GetSampleOfNextEdge() ) < 100000 )
     {
         mGamecube->AdvanceToNextEdge();
         mGamecube->AdvanceToNextEdge();
     }
 }
 
+// advances to the falling edge of the next bit in a packet
 bool GameCubeControllerAnalyzer::AdvanceToNextBitInPacket()
 {
-    if( GetPulseWidthNs( mGamecube->GetSampleNumber(), mGamecube->GetSampleOfNextEdge() ) < 1e5 )
+    if( GetPulseWidthNs( mGamecube->GetSampleNumber(), mGamecube->GetSampleOfNextEdge() ) < 100000 )
     {
         mGamecube->AdvanceToNextEdge();
         return true;
@@ -155,7 +155,6 @@ void GameCubeControllerAnalyzer::DecodeFrames()
         {
             device[ 1 ] = data;
         }
-
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
@@ -163,14 +162,12 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             device[ 0 ] = data;
             frame_v2.AddByteArray( "Device", device, sizeof( device ) );
         }
-
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
             frame_v2.AddByte( "Status", data );
         }
-
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeStopBit();
         AdvanceToEndOfPacket();
@@ -432,7 +429,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "R Anlog", data );
+            frame_v2.AddByte( "R Analog", data );
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
@@ -454,7 +451,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
         U64 end_sample = mGamecube->GetSampleNumber();
         frame.mEndingSampleInclusive = end_sample;
         mResults->AddFrame( frame );
-        mResults->AddFrameV2( frame_v2, "Recalibrate", start_sample, end_sample );
+        mResults->AddFrameV2( frame_v2, "recalibrate", start_sample, end_sample );
         mResults->CommitResults();
     }
     break;
@@ -643,5 +640,7 @@ bool GameCubeControllerAnalyzer::DecodeStopBit()
 
     U64 low_time = GetPulseWidthNs( falling_edge_sample, rising_edge_sample );
 
-    return low_time < 2000;
+    // after observing an OEM controller, the low-time of a stop bit tended to be more than an
+    // average "1" but less than a "0". therefore, we add a bit of leniency.
+    return low_time < 2500;
 }

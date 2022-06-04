@@ -39,9 +39,9 @@ U32 GameCubeControllerSimulationDataGenerator::GenerateSimulationData( U64 large
     return 1;
 }
 
-U64 GameCubeControllerSimulationDataGenerator::NsToSamples( U64 ns )
+U32 GameCubeControllerSimulationDataGenerator::NsToSamples( U64 ns )
 {
-    return mSimulationSampleRateHz * ns / 1e9;
+    return static_cast<U32>( mSimulationSampleRateHz * ns / 1000000000 );
 }
 
 void GameCubeControllerSimulationDataGenerator::GenerateOne()
