@@ -88,7 +88,7 @@ void GameCubeControllerSimulationDataGenerator::GenerateDelayShort()
 }
 void GameCubeControllerSimulationDataGenerator::GenerateDelayLong()
 {
-    mGamecubeSimulationData.Advance( NsToSamples( 1000000000 ) );
+    mGamecubeSimulationData.Advance( NsToSamples( 1000000 ) );
 }
 
 void GameCubeControllerSimulationDataGenerator::GenerateIdCmd()
