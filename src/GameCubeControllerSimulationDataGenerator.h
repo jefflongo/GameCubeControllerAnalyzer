@@ -34,7 +34,7 @@ class GameCubeControllerSimulationDataGenerator
     static const int ID_CMDS = 5;
     static const int POLL_CMDS = 20;
 
-    U64 NsToSamples( U64 ns );
+    U32 NsToSamples( U64 ns );
 
     void GenerateOne();
     void GenerateZero();

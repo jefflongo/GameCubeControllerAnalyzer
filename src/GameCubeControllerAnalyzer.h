@@ -10,15 +10,13 @@ class GameCubeControllerAnalyzerSettings;
 class ANALYZER_EXPORT GameCubeControllerAnalyzer : public Analyzer2
 {
   public:
-    enum FrameType
+    enum JoyBusCommand
     {
-        DATA,
-        CMD_ID,
-        CMD_STATUS,
-        CMD_ORIGIN,
-        CMD_RECALIBRATE,
-        CMD_STATUS_LONG,
-        ERROR,
+        CMD_ID = 0x00,
+        CMD_STATUS = 0x40,
+        CMD_ORIGIN = 0x41,
+        CMD_RECALIBRATE = 0x42,
+        CMD_STATUS_LONG = 0x43,
     };
 
     GameCubeControllerAnalyzer();
@@ -34,13 +32,6 @@ class ANALYZER_EXPORT GameCubeControllerAnalyzer : public Analyzer2
     virtual bool NeedsRerun();
 
   protected: // vars
-    struct ByteDecodeStatus
-    {
-        bool error = false;
-        bool idle = false;
-        U8 byte = 0x00;
-    };
-
     std::auto_ptr<GameCubeControllerAnalyzerSettings> mSettings;
     std::auto_ptr<GameCubeControllerAnalyzerResults> mResults;
     AnalyzerChannelData* mGamecube;
@@ -49,12 +40,14 @@ class ANALYZER_EXPORT GameCubeControllerAnalyzer : public Analyzer2
     bool mSimulationInitilized;
 
     U32 mSampleRateHz;
-    U32 mStartOfStopBitOffset;
-    U32 mEndOfStopBitOffset;
 
     U64 GetPulseWidthNs( U64 start_edge, U64 end_edge );
-    ByteDecodeStatus DecodeByte();
-    void DecodePacket( std::vector<Frame>& packet );
+    void AdvanceToEndOfPacket();
+    bool AdvanceToNextBitInPacket();
+    void DecodeFrames();
+    bool DecodeByte( U8& byte );
+    bool DecodeDataBit( bool& bit );
+    bool DecodeStopBit();
 };
 
 extern "C" ANALYZER_EXPORT const char* __cdecl GetAnalyzerName();

@@ -3,12 +3,12 @@
 #include "GameCubeControllerAnalyzerSettings.h"
 
 #include <AnalyzerChannelData.h>
-#include <vector>
 
 GameCubeControllerAnalyzer::GameCubeControllerAnalyzer()
     : Analyzer2(), mSettings( new GameCubeControllerAnalyzerSettings() ), mSimulationInitilized( false )
 {
     SetAnalyzerSettings( mSettings.get() );
+    UseFrameV2();
 }
 
 GameCubeControllerAnalyzer::~GameCubeControllerAnalyzer()
@@ -29,88 +29,12 @@ void GameCubeControllerAnalyzer::WorkerThread()
 
     mGamecube = GetAnalyzerChannelData( mSettings->mInputChannel );
 
-    // start at the first falling edge
-    if( mGamecube->GetBitState() == BIT_HIGH )
-        mGamecube->AdvanceToNextEdge();
+    AdvanceToEndOfPacket();
 
     while( true )
     {
-        bool idle = false;
-        bool error = false;
-        U64 error_frame_start_sample, error_frame_end_sample;
-        U64 last_processed_sample;
-        std::vector<Frame> packet;
-
-        // construct packet
-        while( !idle )
-        {
-            U64 frame_start_sample = mGamecube->GetSampleNumber();
-            ByteDecodeStatus result = DecodeByte();
-            U64 frame_end_sample = mGamecube->GetSampleNumber();
-
-            Frame frame;
-            frame.mStartingSampleInclusive = frame_start_sample;
-            frame.mEndingSampleInclusive = frame_end_sample;
-            frame.mData1 = result.byte;
-            frame.mFlags = 0;
-            frame.mType = DATA;
-
-            if( result.error )
-            {
-                if( !error )
-                {
-                    error_frame_start_sample = frame_start_sample;
-                }
-                error = true;
-            }
-            if( result.idle )
-            {
-                if( error )
-                {
-                    error_frame_end_sample = frame_start_sample;
-                }
-                idle = true;
-            }
-
-            if( !idle && !error )
-            {
-                packet.push_back( frame );
-            }
-            else if( idle && error )
-            {
-                frame.mStartingSampleInclusive = error_frame_start_sample;
-                frame.mEndingSampleInclusive = error_frame_end_sample;
-                frame.mData1 = 0;
-                frame.mFlags |= DISPLAY_AS_ERROR_FLAG;
-                frame.mType = ERROR;
-                packet.push_back( frame );
-            }
-
-            last_processed_sample = frame_end_sample;
-        }
-
-        // process packet
-        if( !error )
-        {
-            DecodePacket( packet );
-        }
-
-        // commit
-        for( Frame& frame : packet )
-        {
-            mResults->AddFrame( frame );
-            mResults->CommitResults();
-        }
-        if( !error )
-        {
-            mResults->CommitPacketAndStartNewPacket();
-        }
-        else
-        {
-            mResults->CancelPacketAndStartNewPacket();
-        }
-
-        ReportProgress( last_processed_sample );
+        DecodeFrames();
+        ReportProgress( mGamecube->GetSampleNumber() );
         CheckIfThreadShouldExit();
     }
 }
@@ -159,94 +83,564 @@ void DestroyAnalyzer( Analyzer* analyzer )
 
 U64 GameCubeControllerAnalyzer::GetPulseWidthNs( U64 start_edge, U64 end_edge )
 {
-    return ( end_edge - start_edge ) * 1e9 / mSampleRateHz;
+    return static_cast<U64>( ( end_edge - start_edge ) * 1000000000 / mSampleRateHz );
 }
 
-GameCubeControllerAnalyzer::ByteDecodeStatus GameCubeControllerAnalyzer::DecodeByte()
+// advances to the rising edge at the end of a packet
+void GameCubeControllerAnalyzer::AdvanceToEndOfPacket()
 {
-    ByteDecodeStatus status;
-    U64 starting_sample, ending_sample, falling_edge_sample, rising_edge_sample;
-
-    for( U8 bit = 0; bit < 8; bit++ )
+    if( mGamecube->GetBitState() == BIT_LOW )
     {
-        // compute low time
-        starting_sample = falling_edge_sample = mGamecube->GetSampleNumber();
         mGamecube->AdvanceToNextEdge();
-        rising_edge_sample = mGamecube->GetSampleNumber();
-        U64 low_time = GetPulseWidthNs( falling_edge_sample, rising_edge_sample );
+    }
 
-        if( low_time < 2000 )
+    while( GetPulseWidthNs( mGamecube->GetSampleNumber(), mGamecube->GetSampleOfNextEdge() ) < 100000 )
+    {
+        mGamecube->AdvanceToNextEdge();
+        mGamecube->AdvanceToNextEdge();
+    }
+}
+
+// advances to the falling edge of the next bit in a packet
+bool GameCubeControllerAnalyzer::AdvanceToNextBitInPacket()
+{
+    if( GetPulseWidthNs( mGamecube->GetSampleNumber(), mGamecube->GetSampleOfNextEdge() ) < 100000 )
+    {
+        mGamecube->AdvanceToNextEdge();
+        return true;
+    }
+
+    return false;
+}
+
+void GameCubeControllerAnalyzer::DecodeFrames()
+{
+    // traverse to the first falling edge
+    mGamecube->AdvanceToNextEdge();
+    U64 start_sample = mGamecube->GetSampleNumber();
+
+    U8 cmd, data;
+
+    // try to decode the command
+    if( !DecodeByte( cmd ) )
+    {
+        AdvanceToEndOfPacket();
+        return;
+    }
+
+    bool ok = true;
+    FrameV2 frame_v2;
+    // TODO: delete when FrameV2 supports bubble generation
+    Frame frame;
+    frame.mStartingSampleInclusive = start_sample;
+    frame.mType = cmd;
+
+    // TODO: support more commands, there is a list here: https://n64brew.dev/wiki/Joybus_Protocol
+    switch( cmd )
+    {
+    case JoyBusCommand::CMD_ID:
+    {
+        // command stop bit
+        if( !( AdvanceToNextBitInPacket() && DecodeStopBit() ) )
         {
-            // detected a 1
-            status.byte |= 1 << ( 7 - bit );
-            // if a 0 is detected, do nothing
+            AdvanceToEndOfPacket();
+            return;
         }
-        else if( low_time >= 5000 )
+
+        // response
+        uint8_t device[ 2 ];
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
         {
-            // neither a 1 nor 0 detected, data is corrupt
-            status.error = true;
+            device[ 1 ] = data;
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            device[ 0 ] = data;
+            frame_v2.AddByteArray( "Device", device, sizeof( device ) );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "Status", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        AdvanceToEndOfPacket();
+
+        U64 end_sample = mGamecube->GetSampleNumber();
+        frame.mEndingSampleInclusive = end_sample;
+        mResults->AddFrame( frame );
+        mResults->AddFrameV2( frame_v2, "id", start_sample, end_sample );
+        mResults->CommitResults();
+    }
+    break;
+
+    case JoyBusCommand::CMD_STATUS:
+    {
+        // command arg1
+        if( !( AdvanceToNextBitInPacket() && DecodeByte( data ) ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+        frame_v2.AddByte( "Poll Mode", data );
+
+        // command arg2
+        if( !( AdvanceToNextBitInPacket() && DecodeByte( data ) ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+        frame_v2.AddByte( "Motor Mode", data );
+
+        // command stop bit
+        if( !( AdvanceToNextBitInPacket() && DecodeStopBit() ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+
+        // response
+        uint8_t buttons[ 2 ];
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            buttons[ 1 ] = data;
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            buttons[ 0 ] = data;
+            frame_v2.AddByteArray( "Buttons", buttons, sizeof( buttons ) );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "Joystick X", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "Joystick Y", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "C-Stick X", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "C-Stick Y", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "L Analog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "R Analog", data );
+        }
+
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        AdvanceToEndOfPacket();
+
+        U64 end_sample = mGamecube->GetSampleNumber();
+        frame.mEndingSampleInclusive = end_sample;
+        mResults->AddFrame( frame );
+        mResults->AddFrameV2( frame_v2, "status", start_sample, end_sample );
+        mResults->CommitResults();
+    }
+    break;
+
+    case JoyBusCommand::CMD_ORIGIN:
+    {
+        // command stop bit
+        if( !( AdvanceToNextBitInPacket() && DecodeStopBit() ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+
+        // response
+        uint8_t buttons[ 2 ];
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            buttons[ 1 ] = data;
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            buttons[ 0 ] = data;
+            frame_v2.AddByteArray( "Buttons", buttons, sizeof( buttons ) );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "Joystick X", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "Joystick Y", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "C-Stick X", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "C-Stick Y", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "L Analog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "R Analog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "A Analog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "B Analog", data );
+        }
+
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        AdvanceToEndOfPacket();
+
+        U64 end_sample = mGamecube->GetSampleNumber();
+        frame.mEndingSampleInclusive = end_sample;
+        mResults->AddFrame( frame );
+        mResults->AddFrameV2( frame_v2, "origin", start_sample, end_sample );
+        mResults->CommitResults();
+    }
+    break;
+
+
+    case JoyBusCommand::CMD_RECALIBRATE:
+    {
+        // command arg1
+        if( !( AdvanceToNextBitInPacket() && DecodeByte( data ) ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+        frame_v2.AddByte( "Poll Mode", data );
+
+        // command arg2
+        if( !( AdvanceToNextBitInPacket() && DecodeByte( data ) ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+        frame_v2.AddByte( "Motor Mode", data );
+
+        // command stop bit
+        if( !( AdvanceToNextBitInPacket() && DecodeStopBit() ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+
+        // response
+        uint8_t buttons[ 2 ];
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            buttons[ 1 ] = data;
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            buttons[ 0 ] = data;
+            frame_v2.AddByteArray( "Buttons", buttons, sizeof( buttons ) );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "Joystick X", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "Joystick Y", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "C-Stick X", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "C-Stick Y", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "L Analog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "R Analog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "A Analog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "B Analog", data );
+        }
+
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        AdvanceToEndOfPacket();
+
+        U64 end_sample = mGamecube->GetSampleNumber();
+        frame.mEndingSampleInclusive = end_sample;
+        mResults->AddFrame( frame );
+        mResults->AddFrameV2( frame_v2, "recalibrate", start_sample, end_sample );
+        mResults->CommitResults();
+    }
+    break;
+
+    case JoyBusCommand::CMD_STATUS_LONG:
+    {
+        // command arg1
+        if( !( AdvanceToNextBitInPacket() && DecodeByte( data ) ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+        frame_v2.AddByte( "Poll Mode", data );
+
+        // command arg2
+        if( !( AdvanceToNextBitInPacket() && DecodeByte( data ) ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+        frame_v2.AddByte( "Motor Mode", data );
+
+        // command stop bit
+        if( !( AdvanceToNextBitInPacket() && DecodeStopBit() ) )
+        {
+            AdvanceToEndOfPacket();
+            return;
+        }
+
+        // response
+        uint8_t buttons[ 2 ];
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            buttons[ 1 ] = data;
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            buttons[ 0 ] = data;
+            frame_v2.AddByteArray( "Buttons", buttons, sizeof( buttons ) );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "Joystick X", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "Joystick Y", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "C-Stick X", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "C-Stick Y", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "L Analog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "R Anlog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "A Analog", data );
+        }
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeByte( data );
+        if( ok )
+        {
+            frame_v2.AddByte( "B Analog", data );
+        }
+
+        if( ok )
+            ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        AdvanceToEndOfPacket();
+
+        U64 end_sample = mGamecube->GetSampleNumber();
+        frame.mEndingSampleInclusive = end_sample;
+        mResults->AddFrame( frame );
+        mResults->AddFrameV2( frame_v2, "status (long)", start_sample, end_sample );
+        mResults->CommitResults();
+    }
+    break;
+
+    default:
+        AdvanceToEndOfPacket();
+        break;
+    }
+}
+
+// attempts to decode a byte. the current sample should be a falling edge and this
+// function will return on a rising edge
+bool GameCubeControllerAnalyzer::DecodeByte( U8& byte )
+{
+    byte = 0;
+    for( U8 i = 0; i < 8; i++ )
+    {
+        bool bit;
+        if( !DecodeDataBit( bit ) )
+        {
+            return false;
+        }
+
+        byte |= bit << ( 7 - i );
+
+        if( i < 7 )
+        {
+            // advance to the next falling edge iff
+            // - there are more bits to process in the current byte
+            // - the last bit was successful
             mGamecube->AdvanceToNextEdge();
-            break;
         }
+    }
 
-        // compute high time
-        mGamecube->AdvanceToNextEdge();
-        ending_sample = falling_edge_sample = mGamecube->GetSampleNumber();
+    return true;
+}
+
+// attempts to decode a single bit. on entry, the current sample should be a falling edge and this
+// function will return on a rising edge
+bool GameCubeControllerAnalyzer::DecodeDataBit( bool& bit )
+{
+    U64 starting_sample, ending_sample, rising_edge_sample, falling_edge_sample;
+
+    // determine whether the bit is a 1 or 0 based on the duration of the low time
+    starting_sample = falling_edge_sample = mGamecube->GetSampleNumber();
+    mGamecube->AdvanceToNextEdge();
+    rising_edge_sample = mGamecube->GetSampleNumber();
+
+    U64 low_time = GetPulseWidthNs( falling_edge_sample, rising_edge_sample );
+
+    if( low_time >= 5000 )
+    {
+        return false;
+    }
+    else
+    {
+        bit = low_time < 2000;
+
+        // make sure the high time is reasonable. peek at the next falling edge, but don't
+        // actually advance to it yet, in case something is wrong.
+        ending_sample = falling_edge_sample = mGamecube->GetSampleOfNextEdge();
         U64 high_time = GetPulseWidthNs( rising_edge_sample, falling_edge_sample );
 
-        // the line is idle - packet complete
-        if( high_time > 4000 )
+        if( high_time >= 5000 )
         {
-            if( status.byte != 0x80 || bit != 0 )
-            {
-                // not a stop bit
-                status.error = true;
-            }
-            status.idle = true;
-            break;
+            return false;
         }
-        else
-        {
-            U64 middle_sample = ( starting_sample + ending_sample ) / 2;
-            mResults->AddMarker( middle_sample, AnalyzerResults::Dot, mSettings->mInputChannel );
-        }
+
+        // add an indicator showing the bit value
+        U64 middle_sample = ( starting_sample + ending_sample ) / 2;
+        mResults->AddMarker( middle_sample, AnalyzerResults::Dot, mSettings->mInputChannel );
     }
 
-    return status;
+    return true;
 }
 
-void GameCubeControllerAnalyzer::DecodePacket( std::vector<Frame>& packet )
+// attempt to detect a stop bit, which is a single "1" bit where the high time doesn't matter.
+// on entry, the current sample should be a falling edge and this function will return on a rising
+// edge
+bool GameCubeControllerAnalyzer::DecodeStopBit()
 {
-    if( !packet.size() )
-        return;
+    U64 falling_edge_sample = mGamecube->GetSampleNumber();
+    mGamecube->AdvanceToNextEdge();
+    U64 rising_edge_sample = mGamecube->GetSampleNumber();
 
-    U64 cmd = packet[ 0 ].mData1;
-    U64 len = packet.size();
+    U64 low_time = GetPulseWidthNs( falling_edge_sample, rising_edge_sample );
 
-    if( len == 1 )
-    {
-        if( cmd == 0x00 )
-        {
-            packet[ 0 ].mType = CMD_ID;
-        }
-        else if( cmd == 0x41 )
-        {
-            packet[ 0 ].mType = CMD_ORIGIN;
-        }
-    }
-    else if( len == 3 )
-    {
-        if( cmd == 0x40 )
-        {
-            packet[ 0 ].mType = CMD_STATUS;
-        }
-        else if( cmd == 0x42 )
-        {
-            packet[ 0 ].mType = CMD_RECALIBRATE;
-        }
-        else if( cmd == 0x43 )
-        {
-            packet[ 0 ].mType = CMD_STATUS_LONG;
-        }
-    }
+    // after observing an OEM controller, the low-time of a stop bit tended to be more than an
+    // average "1" but less than a "0". therefore, we add a bit of leniency.
+    return low_time < 2500;
 }
