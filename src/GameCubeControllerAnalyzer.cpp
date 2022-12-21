@@ -94,6 +94,16 @@ void GameCubeControllerAnalyzer::AdvanceToEndOfPacket()
         mGamecube->AdvanceToNextEdge();
     }
 
+    // if a complete packet was received successfully, we're already at the end of the packet
+    if( mDecodedReception )
+    {
+        mDecodedReception = false;
+        return;
+    }
+
+    // otherwise, something was corrupted. synchronize to at least 100us of inactivity.
+    // this way, we can be sure we're at the beginning of a transmission and not in between
+    // a transmission and reception
     while( GetPulseWidthNs( mGamecube->GetSampleNumber(), mGamecube->GetSampleOfNextEdge() ) < 100000 )
     {
         mGamecube->AdvanceToNextEdge();
@@ -104,7 +114,12 @@ void GameCubeControllerAnalyzer::AdvanceToEndOfPacket()
 // advances to the falling edge of the next bit in a packet
 bool GameCubeControllerAnalyzer::AdvanceToNextBitInPacket()
 {
-    if( GetPulseWidthNs( mGamecube->GetSampleNumber(), mGamecube->GetSampleOfNextEdge() ) < 100000 )
+    // if the transmission from the host completed, the controller has ~100us to respond
+    // in this condition, provide the extra leniency
+    int duration = mDecodedTransmission ? 100000 : 5000;
+    mDecodedTransmission = false;
+
+    if( GetPulseWidthNs( mGamecube->GetSampleNumber(), mGamecube->GetSampleOfNextEdge() ) < duration )
     {
         mGamecube->AdvanceToNextEdge();
         return true;
@@ -146,6 +161,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             AdvanceToEndOfPacket();
             return;
         }
+        mDecodedTransmission = ok;
 
         // response
         uint8_t device[ 2 ];
@@ -170,6 +186,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        mDecodedReception = ok;
         AdvanceToEndOfPacket();
 
         U64 end_sample = mGamecube->GetSampleNumber();
@@ -204,6 +221,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             AdvanceToEndOfPacket();
             return;
         }
+        mDecodedTransmission = ok;
 
         // response
         uint8_t buttons[ 2 ];
@@ -259,6 +277,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
 
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        mDecodedReception = ok;
         AdvanceToEndOfPacket();
 
         U64 end_sample = mGamecube->GetSampleNumber();
@@ -277,6 +296,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             AdvanceToEndOfPacket();
             return;
         }
+        mDecodedTransmission = ok;
 
         // response
         uint8_t buttons[ 2 ];
@@ -344,6 +364,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
 
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        mDecodedReception = ok;
         AdvanceToEndOfPacket();
 
         U64 end_sample = mGamecube->GetSampleNumber();
@@ -379,6 +400,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             AdvanceToEndOfPacket();
             return;
         }
+        mDecodedTransmission = ok;
 
         // response
         uint8_t buttons[ 2 ];
@@ -446,6 +468,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
 
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        mDecodedReception = ok;
         AdvanceToEndOfPacket();
 
         U64 end_sample = mGamecube->GetSampleNumber();
@@ -480,6 +503,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             AdvanceToEndOfPacket();
             return;
         }
+        mDecodedTransmission = ok;
 
         // response
         uint8_t buttons[ 2 ];
@@ -547,6 +571,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
 
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeStopBit();
+        mDecodedReception = ok;
         AdvanceToEndOfPacket();
 
         U64 end_sample = mGamecube->GetSampleNumber();

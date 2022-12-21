@@ -40,6 +40,8 @@ class ANALYZER_EXPORT GameCubeControllerAnalyzer : public Analyzer2
     bool mSimulationInitilized;
 
     U32 mSampleRateHz;
+    bool mDecodedTransmission = false;
+    bool mDecodedReception = false;
 
     U64 GetPulseWidthNs( U64 start_edge, U64 end_edge );
     void AdvanceToEndOfPacket();
