@@ -206,6 +206,7 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             return;
         }
         frame_v2.AddByte( "Poll Mode", data );
+        U8 poll_mode = data;
 
         // command arg2
         if( !( AdvanceToNextBitInPacket() && DecodeByte( data ) ) )
@@ -254,25 +255,73 @@ void GameCubeControllerAnalyzer::DecodeFrames()
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-Stick X", data );
+            if( poll_mode == 1 || poll_mode == 2 )
+            {
+                frame_v2.AddByte( "C-Stick X", data & 0xF0 );
+                frame_v2.AddByte( "C-Stick Y", data & 0x0F );
+            }
+            else
+            {
+                frame_v2.AddByte( "C-Stick X", data );
+            }
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "C-Stick Y", data );
+            if( poll_mode == 1 )
+            {
+                frame_v2.AddByte( "L Analog", data );
+            }
+            else if( poll_mode == 2 )
+            {
+                frame_v2.AddByte( "L Analog", data & 0xF0 );
+                frame_v2.AddByte( "R Analog", data & 0x0F );
+            }
+            else
+            {
+                frame_v2.AddByte( "C-Stick Y", data );
+            }
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "L Analog", data );
+            if( poll_mode == 0 )
+            {
+                frame_v2.AddByte( "L Analog", data & 0xF0 );
+                frame_v2.AddByte( "R Analog", data & 0x0F );
+            }
+            else if( poll_mode == 1 )
+            {
+                frame_v2.AddByte( "R Analog", data );
+            }
+            else if( poll_mode == 2 || poll_mode == 4 )
+            {
+                frame_v2.AddByte( "A Analog", data );
+            }
+            else
+            {
+                frame_v2.AddByte( "L Analog", data );
+            }
         }
         if( ok )
             ok = AdvanceToNextBitInPacket() && DecodeByte( data );
         if( ok )
         {
-            frame_v2.AddByte( "R Analog", data );
+            if( poll_mode == 0 || poll_mode == 1 )
+            {
+                frame_v2.AddByte( "A Analog", data & 0xF0 );
+                frame_v2.AddByte( "B Analog", data & 0x0F );
+            }
+            else if( poll_mode == 2 || poll_mode == 4 )
+            {
+                frame_v2.AddByte( "B Analog", data );
+            }
+            else
+            {
+                frame_v2.AddByte( "R Analog", data );
+            }
         }
 
         if( ok )
